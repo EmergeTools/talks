@@ -130,13 +130,8 @@ class Resnet50 {
     let dataSize = x.shape![1...].totalElements
     x = graph.reshape(x, shape: [batchSize as NSNumber, dataSize as NSNumber], name: nil)
     x = fullyConnected(x, outputFeatures: 10)
-    output = graph.softMax(with: x, axis: -1, name: nil)
-    var loss = graph.softMaxCrossEntropy(
-      x,
-      labels: outputPlaceholder,
-      axis: -1,
-      reuctionType: .sum,
-      name: nil)
+    var (output, loss) = graph.fixedSoftmaxLoss(x, labels: outputPlaceholder)
+    self.output = output
     loss = graph.division(loss, graph.constant(Double(batchSize), dataType: .float32), name: nil)
 
     let gradients = graph.gradients(of: loss, with: weightTensors, name: nil)

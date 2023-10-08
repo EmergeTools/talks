@@ -8,6 +8,41 @@
 import Foundation
 import MetalPerformanceShadersGraph
 
+extension MPSGraph {
+  func fixedSoftmaxLoss(_ input: MPSGraphTensor, labels: MPSGraphTensor) -> (MPSGraphTensor, MPSGraphTensor) {
+    let exp = exponent(with: input, name: nil)
+    let onesShape = [input.shape![1], 1]
+    let allOnesFloats = [Float](repeating: 1, count: onesShape.totalElements)
+    let allOnesData = Data(bytes: allOnesFloats, count: allOnesFloats.count * MemoryLayout<Float>.stride)
+    let mulConstant = constant(allOnesData, shape: onesShape, dataType: .float32)
+    let summed = matrixMultiplication(primary: exp, secondary: mulConstant, name: nil)
+    let softmax = division(exp, summed, name: nil)
+    let log = logarithm(with: softmax, name: nil)
+    let mul = multiplication(log, labels, name: nil)
+    let sum = reductionSum(with: mul, axes: [0, 1], name: nil)
+    let minus1 = constant(-1, dataType: .float32)
+    let lossBeforeReshape = multiplication(sum, minus1, name: nil)
+    return (softmax, reshape(lossBeforeReshape, shape: [1], name: nil))
+  }
+
+  func fixedMean(of input: MPSGraphTensor) -> MPSGraphTensor {
+    let divisor = input.shape![0].intValue * input.shape![1].intValue * input.shape![2].intValue
+    let reshaped = reshape(input, shape: [NSNumber(value: input.shape![0].intValue * input.shape![1].intValue * input.shape![2].intValue), input.shape![3]], name: nil)
+    let multiplyConstantShape: [NSNumber] = [1, divisor as NSNumber]
+    let multiplyConstantFloat = [Float](repeating: 1, count: multiplyConstantShape.totalElements)
+    let multiplyConstant = constant(Data(bytes: multiplyConstantFloat, count: multiplyConstantFloat.count * MemoryLayout<Float>.stride), shape: multiplyConstantShape, dataType: .float32)
+    let summed = matrixMultiplication(primary: multiplyConstant, secondary: reshaped, name: nil)
+    let divided = division(summed, constant(Double(divisor), dataType: .float32), name: nil)
+    return reshape(divided, shape: [1, 1, 1, input.shape![3]], name: nil)
+  }
+
+  func fixedVariance(of input: MPSGraphTensor, mean: MPSGraphTensor) -> MPSGraphTensor {
+    let subtraced = subtraction(input, mean, name: nil)
+    let squared = square(with: subtraced, name: nil)
+    return fixedMean(of: squared)
+  }
+}
+
 extension Resnet50 {
   static func addMovingVariable(
     _ graph: MPSGraph,
@@ -32,9 +67,8 @@ extension Resnet50 {
     let movingVar = graph.uniformWeights(shape: shape, value: 1)
 
     return graph.if(isTrainingPlaceholder, then: {
-      let axes: [NSNumber] = [0, 1, 2]
-      let mean = self.graph.mean(of: input, axes: axes, name: nil)
-      let variance = self.graph.variance(of: input, mean: mean, axes: axes, name: nil)
+      let mean = self.graph.fixedMean(of: input)
+      let variance = self.graph.fixedVariance(of: input, mean: mean)
       let meanAssign = Self.addMovingVariable(self.graph, newValue: mean, existingValue: movingMean)
       let varAssign = Self.addMovingVariable(self.graph, newValue: variance, existingValue: movingVar)
       return self.graph.controlDependency(with: [meanAssign, varAssign], dependentBlock: {
