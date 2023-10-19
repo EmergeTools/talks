@@ -104,6 +104,7 @@ class Resnet50 {
     let batchSize = 64
     let inputPlaceholder = graph.placeholder(shape: [batchSize as NSNumber, 32, 32, 3], dataType: .float32, name: nil)
     let outputPlaceholder = graph.placeholder(shape: [batchSize as NSNumber, 10], dataType: .float32, name: nil)
+    let batchSizeConstant = graph.constant(Double(batchSize), dataType: .float32)
     var x = conv2D(inputPlaceholder, filters: 2, kernelSize: (7, 7))
     x = batchNormalization(x)
     x = graph.reLU(with: x, name: nil)
@@ -130,11 +131,25 @@ class Resnet50 {
     let dataSize = x.shape![1...].totalElements
     x = graph.reshape(x, shape: [batchSize as NSNumber, dataSize as NSNumber], name: nil)
     x = fullyConnected(x, outputFeatures: 10)
-    var (output, loss) = graph.fixedSoftmaxLoss(x, labels: outputPlaceholder)
-    self.output = output
-    loss = graph.division(loss, graph.constant(Double(batchSize), dataType: .float32), name: nil)
 
-    let gradients = graph.gradients(of: loss, with: weightTensors, name: nil)
+    // Output and derivate of loss wrt output
+    let output = graph.softMax(with: x, axis: -1, name: nil)
+    let lossGrads = graph.subtraction(output, outputPlaceholder, name: nil)
+
+    // Assign then read the loss gradient to prevent it being auto-differentiated
+    let varPlaceholderFloats = [Float](repeating: 0, count: lossGrads.shape!.totalElements)
+    let varPlaceholderData = Data(bytes: varPlaceholderFloats, count: varPlaceholderFloats.count * MemoryLayout<Float>.stride)
+    let outputDerivativeVar = graph.variable(with: varPlaceholderData, shape: lossGrads.shape!, dataType: .float32, name: nil)
+    let assignOp = graph.assign(outputDerivativeVar, tensor: lossGrads, name: nil)
+    let lossGradsRead = graph.controlDependency(with: [assignOp], dependentBlock: {
+      let lossGradsRead = self.graph.read(outputDerivativeVar, name: nil)
+      return [lossGradsRead]
+    }, name: nil)[0]
+    let outputTimesGrads = graph.multiplication(x, lossGradsRead, name: nil)
+    var lossToDifferentiate = graph.reductionSum(with: outputTimesGrads, axes: [0, 1], name: nil)
+    lossToDifferentiate = graph.division(lossToDifferentiate, batchSizeConstant, name: nil)
+
+    let gradients = graph.gradients(of: lossToDifferentiate, with: weightTensors, name: nil)
     let learningRate = graph.constant(0.01, dataType: .float32)
     var updateOps = [MPSGraphOperation]()
     for (key, value) in gradients {
@@ -142,9 +157,13 @@ class Resnet50 {
       updateOps.append(graph.assign(key, tensor: newValue, name: nil))
     }
 
+    // Built in loss, not used for gradients due to framework bugs
+    let softmaxCrossEntropy = graph.softMaxCrossEntropy(x, labels: outputPlaceholder, axis: -1, reuctionType: .sum, name: nil)
+    self.loss = graph.division(softmaxCrossEntropy, batchSizeConstant, name: nil)
+
+    self.output = output
     self.inputPlaceholder = inputPlaceholder
     self.outputPlaceholder = outputPlaceholder
-    self.loss = loss
     self.updateOps = updateOps
   }
 }
