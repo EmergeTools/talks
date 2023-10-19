@@ -8,8 +8,23 @@
 import Foundation
 import MetalPerformanceShadersGraph
 
+struct RandomNumberGeneratorWithSeed: RandomNumberGenerator {
+    init(seed: Int) {
+        // Set the random seed
+        srand48(seed)
+    }
+
+    func next() -> UInt64 {
+        // drand48() returns a Double, transform to UInt64
+        return withUnsafeBytes(of: drand48()) { bytes in
+            bytes.load(as: UInt64.self)
+        }
+    }
+}
+
 func getRandomData(numValues: Int, minimum: Float, maximum: Float) -> [Float] {
-    return (1...numValues).map { _ in Float.random(in: minimum..<maximum) }
+  var rng = RandomNumberGeneratorWithSeed(seed: 1234)
+  return (1...numValues).map { _ in Float.random(in: minimum..<maximum, using: &rng) }
 }
 
 extension Sequence where Element == NSNumber {
