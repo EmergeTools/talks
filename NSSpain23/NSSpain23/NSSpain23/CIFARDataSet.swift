@@ -67,7 +67,8 @@ class CIFARDataSet {
   }
 
   func prepare() {
-    order.shuffle()
+    var rng = RandomNumberGeneratorWithSeed(seed: 1234)
+    order.shuffle(using: &rng)
 
     let channels = 3
     labels = [Float](repeating: 0, count: Self.numClasses * trainingImageCount)

@@ -9,22 +9,6 @@ import Foundation
 import MetalPerformanceShadersGraph
 
 extension MPSGraph {
-  func fixedSoftmaxLoss(_ input: MPSGraphTensor, labels: MPSGraphTensor) -> (MPSGraphTensor, MPSGraphTensor) {
-    let exp = exponent(with: input, name: nil)
-    let onesShape = [input.shape![1], 1]
-    let allOnesFloats = [Float](repeating: 1, count: onesShape.totalElements)
-    let allOnesData = Data(bytes: allOnesFloats, count: allOnesFloats.count * MemoryLayout<Float>.stride)
-    let mulConstant = constant(allOnesData, shape: onesShape, dataType: .float32)
-    let summed = matrixMultiplication(primary: exp, secondary: mulConstant, name: nil)
-    let softmax = division(exp, summed, name: nil)
-    let log = logarithm(with: softmax, name: nil)
-    let mul = multiplication(log, labels, name: nil)
-    let sum = reductionSum(with: mul, axes: [0, 1], name: nil)
-    let minus1 = constant(-1, dataType: .float32)
-    let lossBeforeReshape = multiplication(sum, minus1, name: nil)
-    return (softmax, reshape(lossBeforeReshape, shape: [1], name: nil))
-  }
-
   func fixedMean(of input: MPSGraphTensor) -> MPSGraphTensor {
     let divisor = input.shape![0].intValue * input.shape![1].intValue * input.shape![2].intValue
     let reshaped = reshape(input, shape: [NSNumber(value: input.shape![0].intValue * input.shape![1].intValue * input.shape![2].intValue), input.shape![3]], name: nil)
