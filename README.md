@@ -4,3 +4,4 @@ List of talks from the Emerge Tools team. If you enjoy our talks, you can check 
 
 - [NSSpain 2023](https://github.com/EmergeTools/talks/tree/main/NSSpain23)
 - [Droidcon London 2022](https://github.com/EmergeTools/talks/tree/main/DroidconLondon22)
+- [Swiftable 2023](https://github.com/EmergeTools/talks/tree/main/Swiftable23)
